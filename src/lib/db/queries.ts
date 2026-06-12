@@ -31,33 +31,60 @@ function round2(n: number): number {
 
 // ---------------------------------------------------------------------------
 // Low-level fetchers — each throws a user-facing message on DB error.
+//
+// PostgREST caps a single response at 1000 rows, so every read is paginated
+// with .range() over a stable .order() to avoid truncation (demand_history
+// alone is ~3600 rows).
 // ---------------------------------------------------------------------------
-async function fetchSuppliers(): Promise<SupplierRow[]> {
-  const { data, error } = await getServerSupabase().from('suppliers').select('*');
-  if (error) throw new Error(`Could not load suppliers: ${error.message}`);
-  return (data ?? []) as SupplierRow[];
+const PAGE_SIZE = 1000;
+
+async function selectAll<T>(
+  table: string,
+  columns: string,
+  orderBy: string,
+  filter?: { column: string; value: string },
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = getServerSupabase().from(table).select(columns);
+    if (filter) query = query.eq(filter.column, filter.value);
+
+    const { data, error } = await query
+      .order(orderBy, { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(`Could not load ${table}: ${error.message}`);
+
+    const page = (data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
 }
 
-async function fetchProducts(): Promise<ProductRow[]> {
-  const { data, error } = await getServerSupabase().from('products').select('*');
-  if (error) throw new Error(`Could not load products: ${error.message}`);
-  return (data ?? []) as ProductRow[];
+function fetchSuppliers(): Promise<SupplierRow[]> {
+  return selectAll<SupplierRow>('suppliers', '*', 'name');
 }
 
-async function fetchBatches(productId?: string): Promise<BatchRow[]> {
-  let query = getServerSupabase().from('batches').select('*');
-  if (productId) query = query.eq('product_id', productId);
-  const { data, error } = await query;
-  if (error) throw new Error(`Could not load batches: ${error.message}`);
-  return (data ?? []) as BatchRow[];
+function fetchProducts(): Promise<ProductRow[]> {
+  return selectAll<ProductRow>('products', '*', 'name');
 }
 
-async function fetchDemand(productId?: string): Promise<DemandRow[]> {
-  let query = getServerSupabase().from('demand_history').select('product_id, date, qty');
-  if (productId) query = query.eq('product_id', productId);
-  const { data, error } = await query;
-  if (error) throw new Error(`Could not load demand history: ${error.message}`);
-  return (data ?? []) as DemandRow[];
+function fetchBatches(productId?: string): Promise<BatchRow[]> {
+  return selectAll<BatchRow>(
+    'batches',
+    '*',
+    'expiry_date',
+    productId ? { column: 'product_id', value: productId } : undefined,
+  );
+}
+
+function fetchDemand(productId?: string): Promise<DemandRow[]> {
+  return selectAll<DemandRow>(
+    'demand_history',
+    'product_id, date, qty',
+    'date',
+    productId ? { column: 'product_id', value: productId } : undefined,
+  );
 }
 
 // ---------------------------------------------------------------------------
