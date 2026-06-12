@@ -1,10 +1,10 @@
-export default function Home() {
-  return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-4 px-6 text-center">
-      <h1 className="text-2xl font-semibold text-foreground">PharmaStock</h1>
-      <p className="text-muted">
-        Pharmaceutical supply-chain analytics. Dashboard coming up in the next build step.
-      </p>
-    </main>
-  );
+import { getDashboardData } from '@/lib/db/queries';
+import { DashboardView } from '@/components/dashboard/dashboard-view';
+
+// Always reflect the latest sandbox state.
+export const dynamic = 'force-dynamic';
+
+export default async function DashboardPage() {
+  const { products, batchesByProduct } = await getDashboardData();
+  return <DashboardView products={products} batchesByProduct={batchesByProduct} />;
 }
