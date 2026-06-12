@@ -14,6 +14,7 @@
  */
 import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { demandStats, reorderPoint, safetyStock } from '../src/lib/domain';
 
 config({ path: '.env.local' });
 
@@ -376,6 +377,14 @@ const ANOMALIES: Array<[number, number, number]> = [
   [6, 25, 3.9],
 ];
 
+// Deliberately under-stock a spread of products so the dashboard and reorder
+// page have material (a realistic mix of statuses, not all "OK"). Indices are
+// chosen outside the forced near-expiry set (0–13) and across categories,
+// including cold-chain. Stock targets are computed from each product's actual
+// reorder thresholds, so the status is guaranteed.
+const CRITICAL_PRODUCTS = new Set([16, 27, 34]); // Losartan, Filgrastim, Budesonide
+const REORDER_PRODUCTS = new Set([14, 18, 22, 31, 37]); // Bisoprolol, Furosemide, Pneumococcal, Sitagliptin, Hydrocortisone
+
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
@@ -438,20 +447,25 @@ async function main(): Promise<void> {
   const { data: suppliers, error: supErr } = await supabase
     .from('suppliers')
     .insert(SUPPLIERS.map((s) => ({ ...s })))
-    .select('id');
+    .select('id, lead_time_days');
   if (supErr || !suppliers) {
     throw new Error(`Insert suppliers failed: ${supErr?.message ?? 'no rows returned'}`);
   }
 
-  // Products
-  const productRows = PRODUCTS.map((p) => ({
-    name: p.name,
-    category: p.category,
-    unit_cost: round2(rand(p.costRange[0], p.costRange[1])),
-    pack_size: p.packSize ?? 10,
-    cold_chain: p.coldChain ?? false,
-    supplier_id: pick(suppliers).id,
-  }));
+  // Products — assign a supplier and remember its lead time for reorder math.
+  const leadByProduct: number[] = [];
+  const productRows = PRODUCTS.map((p) => {
+    const supplier = pick(suppliers) as { id: string; lead_time_days: number };
+    leadByProduct.push(supplier.lead_time_days);
+    return {
+      name: p.name,
+      category: p.category,
+      unit_cost: round2(rand(p.costRange[0], p.costRange[1])),
+      pack_size: p.packSize ?? 10,
+      cold_chain: p.coldChain ?? false,
+      supplier_id: supplier.id,
+    };
+  });
   const { data: products, error: prodErr } = await supabase
     .from('products')
     .insert(productRows)
@@ -460,12 +474,52 @@ async function main(): Promise<void> {
     throw new Error(`Insert products failed: ${prodErr?.message ?? 'no rows returned'}`);
   }
 
-  // Per-product average daily demand (reused for batch sizing + history).
+  // Per-product average daily demand.
   const baseDemand = PRODUCTS.map((p) =>
     Math.max(1, Math.round(rand(p.demandRange[0], p.demandRange[1]))),
   );
 
-  // Batches
+  // Demand history first (in memory): 90 days per product with weekday
+  // seasonality + noise, plus the deliberate anomaly spikes. Series index k
+  // corresponds to (89 − k) days ago.
+  const anomalyMap = new Map<string, number>();
+  for (const [idx, daysAgo, mult] of ANOMALIES) {
+    anomalyMap.set(`${idx}:${daysAgo}`, mult);
+  }
+  const demandSeries: number[][] = PRODUCTS.map((_, i) => {
+    const base = baseDemand[i]!;
+    const series: number[] = [];
+    for (let daysAgo = 89; daysAgo >= 0; daysAgo--) {
+      const dow = new Date(dateOffset(-daysAgo)).getUTCDay();
+      const weekendFactor = dow === 0 || dow === 6 ? 0.55 : 1;
+      const spike = anomalyMap.get(`${i}:${daysAgo}`);
+      const qty =
+        spike !== undefined
+          ? Math.round(base * spike)
+          : Math.max(0, Math.round(base * weekendFactor + gaussian(0, base * 0.18)));
+      series.push(qty);
+    }
+    return series;
+  });
+
+  // Target total stock per product, derived from its real reorder thresholds so
+  // the resulting status is guaranteed (most OK, a few Reorder/Critical).
+  const targetStock = PRODUCTS.map((_, i) => {
+    const stats = demandStats(demandSeries[i]!);
+    const ss = safetyStock(stats.stdDev, leadByProduct[i]!);
+    const rop = reorderPoint(stats.mean, leadByProduct[i]!, ss);
+    if (CRITICAL_PRODUCTS.has(i)) {
+      return Math.max(0, Math.round(ss * rand(0.2, 0.7))); // at or below safety stock
+    }
+    if (REORDER_PRODUCTS.has(i)) {
+      const between = Math.round(ss + (rop - ss) * rand(0.3, 0.85));
+      return Math.min(Math.floor(rop), Math.max(Math.round(ss) + 1, between)); // (SS, ROP]
+    }
+    return Math.round(stats.mean * rand(45, 85)); // comfortable cover
+  });
+
+  // Batches — distribute each product's target stock across 3–4 lots with the
+  // designed expiry spread.
   const batchRows: Array<{
     product_id: string;
     batch_number: string;
@@ -476,15 +530,16 @@ async function main(): Promise<void> {
   let batchSeq = 1;
   PRODUCTS.forEach((p, i) => {
     const numBatches = randInt(3, 4);
+    const perBatch = Math.floor(targetStock[i]! / numBatches);
     for (let b = 0; b < numBatches; b++) {
       const offset = expiryOffsetDays(i, b);
-      const expired = offset < 0;
-      const qty = Math.max(0, Math.round(baseDemand[i]! * (expired ? rand(3, 14) : rand(8, 40))));
+      // Put the remainder on the first lot so the quantities sum to the target.
+      const quantity = b === 0 ? targetStock[i]! - perBatch * (numBatches - 1) : perBatch;
       const received = Math.min(-5, offset - randInt(120, 540)); // before expiry, in the past
       batchRows.push({
         product_id: products[i]!.id,
         batch_number: batchCode(p.name, batchSeq++),
-        quantity: qty,
+        quantity: Math.max(0, quantity),
         expiry_date: dateOffset(offset),
         received_at: dateOffset(Math.max(received, -700)),
       });
@@ -492,27 +547,12 @@ async function main(): Promise<void> {
   });
   await chunkedInsert('batches', batchRows);
 
-  // Demand history: 90 days per product with weekday seasonality + noise,
-  // plus the deliberate anomaly spikes.
-  const anomalyMap = new Map<string, number>();
-  for (const [idx, daysAgo, mult] of ANOMALIES) {
-    anomalyMap.set(`${idx}:${daysAgo}`, mult);
-  }
-
+  // Persist the demand series generated above.
   const demandRows: Array<{ product_id: string; date: string; qty: number }> = [];
-  PRODUCTS.forEach((_, i) => {
-    const base = baseDemand[i]!;
-    for (let daysAgo = 89; daysAgo >= 0; daysAgo--) {
-      const dateStr = dateOffset(-daysAgo);
-      const dow = new Date(dateStr).getUTCDay();
-      const weekendFactor = dow === 0 || dow === 6 ? 0.55 : 1;
-      let qty = Math.max(0, Math.round(base * weekendFactor + gaussian(0, base * 0.18)));
-      const spike = anomalyMap.get(`${i}:${daysAgo}`);
-      if (spike !== undefined) {
-        qty = Math.round(base * spike);
-      }
-      demandRows.push({ product_id: products[i]!.id, date: dateStr, qty });
-    }
+  demandSeries.forEach((series, i) => {
+    series.forEach((qty, k) => {
+      demandRows.push({ product_id: products[i]!.id, date: dateOffset(-(89 - k)), qty });
+    });
   });
   await chunkedInsert('demand_history', demandRows);
 
@@ -521,8 +561,9 @@ async function main(): Promise<void> {
       `${batchRows.length} batches, ${demandRows.length} demand rows.`,
   );
   console.log(
-    `Included ${ANOMALIES.length} demand anomalies and ` +
-      `${batchRows.filter((b) => b.expiry_date < dateOffset(0)).length} expired batches.`,
+    `Included ${ANOMALIES.length} demand anomalies, ` +
+      `${batchRows.filter((b) => b.expiry_date < dateOffset(0)).length} expired batches, ` +
+      `${CRITICAL_PRODUCTS.size} critical + ${REORDER_PRODUCTS.size} reorder products.`,
   );
 }
 
