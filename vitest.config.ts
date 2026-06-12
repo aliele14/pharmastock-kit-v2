@@ -8,7 +8,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/lib/domain/**/*.ts'],
-      exclude: ['src/lib/domain/**/*.test.ts'],
+      // Exclude tests, the barrel re-export, and the type-only module (no runtime code).
+      exclude: [
+        'src/lib/domain/**/*.test.ts',
+        'src/lib/domain/index.ts',
+        'src/lib/domain/types.ts',
+      ],
       thresholds: {
         statements: 95,
         branches: 95,
