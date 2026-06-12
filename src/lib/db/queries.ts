@@ -1,0 +1,280 @@
+import 'server-only';
+import {
+  daysToExpiry,
+  demandStats,
+  expiryBucket,
+  fefoRank,
+  reorderPoint,
+  safetyStock,
+  stockStatus,
+  suggestedOrderQty,
+  valueAtRisk,
+} from '@/lib/domain';
+import { getServerSupabase } from './client';
+import type {
+  BatchRow,
+  BatchView,
+  DemandRow,
+  ExpiringBatchView,
+  ExpiryRisk,
+  ProductDetail,
+  ProductMetrics,
+  ProductRow,
+  SupplierRow,
+} from './types';
+
+const EXPIRY_HORIZONS = [30, 60, 90] as const;
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ---------------------------------------------------------------------------
+// Low-level fetchers — each throws a user-facing message on DB error.
+// ---------------------------------------------------------------------------
+async function fetchSuppliers(): Promise<SupplierRow[]> {
+  const { data, error } = await getServerSupabase().from('suppliers').select('*');
+  if (error) throw new Error(`Could not load suppliers: ${error.message}`);
+  return (data ?? []) as SupplierRow[];
+}
+
+async function fetchProducts(): Promise<ProductRow[]> {
+  const { data, error } = await getServerSupabase().from('products').select('*');
+  if (error) throw new Error(`Could not load products: ${error.message}`);
+  return (data ?? []) as ProductRow[];
+}
+
+async function fetchBatches(productId?: string): Promise<BatchRow[]> {
+  let query = getServerSupabase().from('batches').select('*');
+  if (productId) query = query.eq('product_id', productId);
+  const { data, error } = await query;
+  if (error) throw new Error(`Could not load batches: ${error.message}`);
+  return (data ?? []) as BatchRow[];
+}
+
+async function fetchDemand(productId?: string): Promise<DemandRow[]> {
+  let query = getServerSupabase().from('demand_history').select('product_id, date, qty');
+  if (productId) query = query.eq('product_id', productId);
+  const { data, error } = await query;
+  if (error) throw new Error(`Could not load demand history: ${error.message}`);
+  return (data ?? []) as DemandRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Composition helpers (group rows, then apply the domain layer).
+// ---------------------------------------------------------------------------
+function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const row of rows) {
+    const k = key(row);
+    const bucket = map.get(k);
+    if (bucket) bucket.push(row);
+    else map.set(k, [row]);
+  }
+  return map;
+}
+
+function computeMetrics(
+  product: ProductRow,
+  supplier: SupplierRow | undefined,
+  batches: readonly BatchRow[],
+  demandQtys: readonly number[],
+): ProductMetrics {
+  const leadTimeDays = supplier?.lead_time_days ?? 0;
+  const totalStock = batches.reduce((sum, b) => sum + b.quantity, 0);
+  const stats = demandStats(demandQtys);
+  const safety = safetyStock(stats.stdDev, leadTimeDays);
+  const rop = reorderPoint(stats.mean, leadTimeDays, safety);
+
+  return {
+    id: product.id,
+    name: product.name,
+    category: product.category,
+    unitCost: product.unit_cost,
+    packSize: product.pack_size,
+    coldChain: product.cold_chain,
+    supplierName: supplier?.name ?? 'Unknown supplier',
+    leadTimeDays,
+    totalStock,
+    status: stockStatus(totalStock, rop, safety),
+    meanDemand: round2(stats.mean),
+    stdDevDemand: round2(stats.stdDev),
+    safetyStock: round2(safety),
+    reorderPoint: round2(rop),
+    suggestedOrderQty: suggestedOrderQty(stats.mean, leadTimeDays, totalStock, product.pack_size),
+  };
+}
+
+function toBatchViews(batches: readonly BatchRow[], unitCost: number, asOf: Date): BatchView[] {
+  const ranks = fefoRank(
+    batches.map((b) => ({ id: b.id, batchNumber: b.batch_number, expiryDate: b.expiry_date })),
+  );
+  return batches
+    .map((b) => {
+      const days = daysToExpiry(b.expiry_date, asOf);
+      return {
+        id: b.id,
+        batchNumber: b.batch_number,
+        quantity: b.quantity,
+        expiryDate: b.expiry_date,
+        daysToExpiry: days,
+        fefoRank: ranks.get(b.id) ?? 0,
+        bucket: expiryBucket(days),
+        lineValue: round2(b.quantity * unitCost),
+      };
+    })
+    .sort((a, b) => a.fefoRank - b.fefoRank);
+}
+
+// ---------------------------------------------------------------------------
+// Public queries.
+// ---------------------------------------------------------------------------
+
+/** All products with computed stock + reorder metrics (Dashboard F1). */
+export async function getInventoryOverview(): Promise<ProductMetrics[]> {
+  const [suppliers, products, batches, demand] = await Promise.all([
+    fetchSuppliers(),
+    fetchProducts(),
+    fetchBatches(),
+    fetchDemand(),
+  ]);
+
+  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+  const batchesByProduct = groupBy(batches, (b) => b.product_id);
+  const demandByProduct = groupBy(demand, (d) => d.product_id);
+
+  return products
+    .map((product) =>
+      computeMetrics(
+        product,
+        supplierById.get(product.supplier_id),
+        batchesByProduct.get(product.id) ?? [],
+        (demandByProduct.get(product.id) ?? []).map((d) => d.qty),
+      ),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Dashboard payload: product metrics plus their batch views, fetched once. */
+export async function getDashboardData(): Promise<{
+  products: ProductMetrics[];
+  batchesByProduct: Record<string, BatchView[]>;
+}> {
+  const asOf = new Date();
+  const [suppliers, products, batches, demand] = await Promise.all([
+    fetchSuppliers(),
+    fetchProducts(),
+    fetchBatches(),
+    fetchDemand(),
+  ]);
+
+  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+  const batchesByProductRow = groupBy(batches, (b) => b.product_id);
+  const demandByProduct = groupBy(demand, (d) => d.product_id);
+
+  const metrics = products
+    .map((product) =>
+      computeMetrics(
+        product,
+        supplierById.get(product.supplier_id),
+        batchesByProductRow.get(product.id) ?? [],
+        (demandByProduct.get(product.id) ?? []).map((d) => d.qty),
+      ),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const batchesByProduct: Record<string, BatchView[]> = {};
+  for (const product of products) {
+    batchesByProduct[product.id] = toBatchViews(
+      batchesByProductRow.get(product.id) ?? [],
+      product.unit_cost,
+      asOf,
+    );
+  }
+
+  return { products: metrics, batchesByProduct };
+}
+
+/** One product with its batches and demand series (Product detail F2). */
+export async function getProductDetail(productId: string): Promise<ProductDetail | null> {
+  const products = await fetchProducts();
+  const product = products.find((p) => p.id === productId);
+  if (!product) return null;
+
+  const [suppliers, batches, demand] = await Promise.all([
+    fetchSuppliers(),
+    fetchBatches(productId),
+    fetchDemand(productId),
+  ]);
+
+  const supplier = suppliers.find((s) => s.id === product.supplier_id);
+  const metrics = computeMetrics(
+    product,
+    supplier,
+    batches,
+    demand.map((d) => d.qty),
+  );
+
+  return {
+    product: metrics,
+    batches: toBatchViews(batches, product.unit_cost, new Date()),
+    demand: demand
+      .map((d) => ({ date: d.date, qty: d.qty }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  };
+}
+
+/** Value-at-risk KPIs and the batches behind them (Expiry risk page F2). */
+export async function getExpiryRisk(): Promise<ExpiryRisk> {
+  const asOf = new Date();
+  const [products, batches] = await Promise.all([fetchProducts(), fetchBatches()]);
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  const valued = batches.map((b) => ({
+    quantity: b.quantity,
+    unitCost: productById.get(b.product_id)?.unit_cost ?? 0,
+    expiryDate: b.expiry_date,
+  }));
+
+  const kpis = EXPIRY_HORIZONS.map((horizonDays) => ({
+    horizonDays,
+    value: valueAtRisk(valued, horizonDays, asOf),
+    batchCount: batches.filter((b) => daysToExpiry(b.expiry_date, asOf) <= horizonDays).length,
+  }));
+
+  const expiringBatches: ExpiringBatchView[] = batches
+    .map((b) => {
+      const product = productById.get(b.product_id);
+      const unitCost = product?.unit_cost ?? 0;
+      const days = daysToExpiry(b.expiry_date, asOf);
+      return {
+        id: b.id,
+        batchNumber: b.batch_number,
+        quantity: b.quantity,
+        expiryDate: b.expiry_date,
+        daysToExpiry: days,
+        fefoRank: 0,
+        bucket: expiryBucket(days),
+        lineValue: round2(b.quantity * unitCost),
+        productId: b.product_id,
+        productName: product?.name ?? 'Unknown product',
+        coldChain: product?.cold_chain ?? false,
+      };
+    })
+    .filter((b) => b.daysToExpiry <= 90)
+    .sort((a, b) => a.daysToExpiry - b.daysToExpiry);
+
+  return { kpis, batches: expiringBatches };
+}
+
+/** Products flagged for reorder, most urgent first (Reorder page F3). */
+export async function getReorderAlerts(): Promise<ProductMetrics[]> {
+  const overview = await getInventoryOverview();
+  const severity: Record<ProductMetrics['status'], number> = { Critical: 0, Reorder: 1, OK: 2 };
+  return overview
+    .filter((p) => p.status !== 'OK')
+    .sort(
+      (a, b) =>
+        severity[a.status] - severity[b.status] || b.suggestedOrderQty - a.suggestedOrderQty,
+    );
+}
