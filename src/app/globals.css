@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+
+/* Manual (class-based) dark mode, defaulting to the system preference via the
+   inline script in layout.tsx. `dark:` utilities apply under a `.dark` ancestor. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f8fafc; /* slate-50 */
+  --surface: #ffffff;
+  --surface-muted: #f1f5f9; /* slate-100 */
+  --foreground: #0f172a; /* slate-900 */
+  --muted: #64748b; /* slate-500 */
+  --border: #e2e8f0; /* slate-200 */
+}
+
+.dark {
+  --background: #0a0c10;
+  --surface: #111419;
+  --surface-muted: #171a20;
+  --foreground: #e6e8eb;
+  --muted: #98a2b3;
+  --border: #242830;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+
+  --color-accent: #0f766e; /* deep teal */
+  --color-accent-foreground: #ffffff;
+
+  --font-sans: var(--font-inter);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
