@@ -17,7 +17,6 @@ import type {
   DemandRow,
   ExpiringBatchView,
   ExpiryRisk,
-  ProductDetail,
   ProductMetrics,
   ProductRow,
   SupplierRow,
@@ -157,8 +156,11 @@ function toBatchViews(batches: readonly BatchRow[], unitCost: number, asOf: Date
 // Public queries.
 // ---------------------------------------------------------------------------
 
-/** All products with computed stock + reorder metrics (Dashboard F1). */
-export async function getInventoryOverview(): Promise<ProductMetrics[]> {
+async function fetchAndBuildMetrics(): Promise<{
+  products: ProductRow[];
+  metrics: ProductMetrics[];
+  rawBatches: Map<string, BatchRow[]>;
+}> {
   const [suppliers, products, batches, demand] = await Promise.all([
     fetchSuppliers(),
     fetchProducts(),
@@ -167,19 +169,27 @@ export async function getInventoryOverview(): Promise<ProductMetrics[]> {
   ]);
 
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
-  const batchesByProduct = groupBy(batches, (b) => b.product_id);
+  const rawBatches = groupBy(batches, (b) => b.product_id);
   const demandByProduct = groupBy(demand, (d) => d.product_id);
 
-  return products
+  const metrics = products
     .map((product) =>
       computeMetrics(
         product,
         supplierById.get(product.supplier_id),
-        batchesByProduct.get(product.id) ?? [],
+        rawBatches.get(product.id) ?? [],
         (demandByProduct.get(product.id) ?? []).map((d) => d.qty),
       ),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { products, metrics, rawBatches };
+}
+
+/** All products with computed stock + reorder metrics (Dashboard F1). */
+export async function getInventoryOverview(): Promise<ProductMetrics[]> {
+  const { metrics } = await fetchAndBuildMetrics();
+  return metrics;
 }
 
 /** Dashboard payload: product metrics plus their batch views, fetched once. */
@@ -188,67 +198,18 @@ export async function getDashboardData(): Promise<{
   batchesByProduct: Record<string, BatchView[]>;
 }> {
   const asOf = new Date();
-  const [suppliers, products, batches, demand] = await Promise.all([
-    fetchSuppliers(),
-    fetchProducts(),
-    fetchBatches(),
-    fetchDemand(),
-  ]);
-
-  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
-  const batchesByProductRow = groupBy(batches, (b) => b.product_id);
-  const demandByProduct = groupBy(demand, (d) => d.product_id);
-
-  const metrics = products
-    .map((product) =>
-      computeMetrics(
-        product,
-        supplierById.get(product.supplier_id),
-        batchesByProductRow.get(product.id) ?? [],
-        (demandByProduct.get(product.id) ?? []).map((d) => d.qty),
-      ),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const { products, metrics, rawBatches } = await fetchAndBuildMetrics();
 
   const batchesByProduct: Record<string, BatchView[]> = {};
   for (const product of products) {
     batchesByProduct[product.id] = toBatchViews(
-      batchesByProductRow.get(product.id) ?? [],
+      rawBatches.get(product.id) ?? [],
       product.unit_cost,
       asOf,
     );
   }
 
   return { products: metrics, batchesByProduct };
-}
-
-/** One product with its batches and demand series (Product detail F2). */
-export async function getProductDetail(productId: string): Promise<ProductDetail | null> {
-  const products = await fetchProducts();
-  const product = products.find((p) => p.id === productId);
-  if (!product) return null;
-
-  const [suppliers, batches, demand] = await Promise.all([
-    fetchSuppliers(),
-    fetchBatches(productId),
-    fetchDemand(productId),
-  ]);
-
-  const supplier = suppliers.find((s) => s.id === product.supplier_id);
-  const metrics = computeMetrics(
-    product,
-    supplier,
-    batches,
-    demand.map((d) => d.qty),
-  );
-
-  return {
-    product: metrics,
-    batches: toBatchViews(batches, product.unit_cost, new Date()),
-    demand: demand
-      .map((d) => ({ date: d.date, qty: d.qty }))
-      .sort((a, b) => a.date.localeCompare(b.date)),
-  };
 }
 
 /** Value-at-risk KPIs and the batches behind them (Expiry risk page F2). */
@@ -280,7 +241,7 @@ export async function getExpiryRisk(): Promise<ExpiryRisk> {
         quantity: b.quantity,
         expiryDate: b.expiry_date,
         daysToExpiry: days,
-        fefoRank: 0,
+        fefoRank: -1, // not applicable in global expiry view
         bucket: expiryBucket(days),
         lineValue: round2(b.quantity * unitCost),
         productId: b.product_id,

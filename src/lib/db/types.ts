@@ -69,17 +69,6 @@ export interface BatchView {
   lineValue: number;
 }
 
-export interface DemandPoint {
-  date: IsoDate;
-  qty: number;
-}
-
-export interface ProductDetail {
-  product: ProductMetrics;
-  batches: BatchView[];
-  demand: DemandPoint[];
-}
-
 export interface ExpiryKpi {
   horizonDays: number;
   value: number;
