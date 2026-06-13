@@ -1,0 +1,25 @@
+name: Heartbeat
+
+# Pings the production health endpoint every 3 days.
+# Purpose: prevent the Supabase free-tier project from auto-pausing after 7 days of
+# inactivity. The health endpoint does a trivial DB read, which is enough to count as
+# activity from Supabase's perspective.
+# See docs/DECISIONS.md for the full rationale.
+#
+# Setup: add a repository variable named PRODUCTION_URL set to the Vercel deployment URL,
+# e.g. https://pharmastock.vercel.app — no trailing slash.
+
+on:
+  schedule:
+    - cron: '0 8 */3 * *' # 08:00 UTC every 3 days (1st, 4th, 7th … of each month)
+  workflow_dispatch: # allow manual triggers from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          echo "Pinging ${{ vars.PRODUCTION_URL }}/api/health"
+          curl --fail --silent --show-error "${{ vars.PRODUCTION_URL }}/api/health"
+          echo " — OK"

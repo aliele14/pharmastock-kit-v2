@@ -36,3 +36,10 @@ One line per non-trivial technical decision: date — decision — why.
 - 2026-06-13 — `/api/admin/reset` now exports GET (primary Vercel cron entry point) and keeps POST (manual). — Vercel Cron only issues GET; SPEC §F7 updated to match.
 - 2026-06-13 — `ui.tsx` marked `'use client'` to enable useEffect/useId/useRef in the Dialog component. — Dialog needed Escape handler, focus restore, and ARIA ids; these require hooks, which require the client directive. All exports in ui.tsx are pure presentation with no server-only imports, so the change is safe.
 - 2026-06-13 — `SortKey` extended with `valueAtRisk30d` and `minDaysToExpiry` for chip-driven sort. — The `top-var` and `expiring-60` chips advertise a specific ordering that requires sorting on computed fields not in the original sort key union.
+
+## Phase 3
+
+- 2026-06-13 — PWA icons use SVG only (no PNG). — Chrome 93+ and all modern browsers support SVG in the web manifest with `"purpose": "any"`; generating PNG binaries requires external tooling not warranted for a portfolio project.
+- 2026-06-13 — OG image generated via `next/og` `ImageResponse` (`src/app/opengraph-image.tsx`). — Built-in Next.js App Router feature; zero new dependencies; generates a branded card for LinkedIn/social sharing at build time on the edge runtime.
+- 2026-06-13 — CI workflow runs lint + typecheck + test only (no build step). — `npm run build` requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` env secrets that are not available in CI without additional setup; the three code-quality gates catch errors reliably without needing a full production build.
+- 2026-06-13 — Heartbeat cron (`heartbeat.yml`) pings `/api/health` every 3 days via a GitHub Actions scheduled workflow. — Supabase free-tier projects pause after 7 days of inactivity; a lightweight HTTP GET is enough to count as activity and is free to run in GitHub Actions. The `PRODUCTION_URL` repo variable is set by Alina during deployment; the workflow_dispatch trigger allows manual pings at any time.
