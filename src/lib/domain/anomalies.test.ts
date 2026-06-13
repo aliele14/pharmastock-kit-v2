@@ -20,7 +20,7 @@ describe('detectAnomalies', () => {
     expect(detectAnomalies(makeSeries(Array<number>(MIN_DATAPOINTS - 1).fill(10)))).toEqual([]);
   });
 
-  it('returns [] on exactly MIN_DATAPOINTS with one spike (boundary ≥ is accepted)', () => {
+  it('detects anomaly on exactly MIN_DATAPOINTS (lower boundary is inclusive)', () => {
     // 13 values of 10, one spike → total 14 = MIN_DATAPOINTS → should detect
     const qtys = [...Array<number>(MIN_DATAPOINTS - 1).fill(10), 200];
     expect(detectAnomalies(makeSeries(qtys))).toHaveLength(1);
@@ -143,5 +143,10 @@ describe('hasRecentAnomaly', () => {
       { date: '2026-06-12', qty: 150, zScore: 4.0 }, // recent
     ];
     expect(hasRecentAnomaly(anomalies, '2026-06-13', 14)).toBe(true);
+  });
+
+  it('excludes anomalies dated after asOfIso (upper bound)', () => {
+    const anomalies = [{ date: '2026-06-20', qty: 100, zScore: 3.5 }];
+    expect(hasRecentAnomaly(anomalies, '2026-06-13', 14)).toBe(false);
   });
 });

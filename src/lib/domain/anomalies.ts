@@ -47,5 +47,5 @@ export function hasRecentAnomaly(
 ): boolean {
   const asOfMs = new Date(asOfIso + 'T00:00:00Z').getTime();
   const cutoff = new Date(asOfMs - (recentDays - 1) * MS_PER_DAY).toISOString().slice(0, 10);
-  return anomalies.some((a) => a.date >= cutoff);
+  return anomalies.some((a) => a.date >= cutoff && a.date <= asOfIso);
 }
