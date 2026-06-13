@@ -30,3 +30,9 @@ One line per non-trivial technical decision: date — decision — why.
 - 2026-06-13 — Product DELETE cascades in the route handler (demand_history → batches → products) rather than relying on DB foreign-key cascade. — The Supabase project was created without explicit ON DELETE CASCADE constraints; doing it in the route handler is safe and explicit.
 - 2026-06-13 — `/api/admin/reset` re-implements the seed logic (same Mulberry32 PRNG, seed 0x50484152) rather than importing from `scripts/seed.ts`. — The seed script calls `dotenv/config` and uses a direct `createClient` call with a different env-load path; importing it into a route handler would fail at runtime. Duplication is the simpler and more correct choice here.
 - 2026-06-13 — Zod used for request-body validation in all CRUD route handlers. — Concise schema definition with typed parse result; no extra dependency (already in the stack for type-safe validation at system boundaries).
+
+## Phase 2 triage fixes
+
+- 2026-06-13 — `/api/admin/reset` now exports GET (primary Vercel cron entry point) and keeps POST (manual). — Vercel Cron only issues GET; SPEC §F7 updated to match.
+- 2026-06-13 — `ui.tsx` marked `'use client'` to enable useEffect/useId/useRef in the Dialog component. — Dialog needed Escape handler, focus restore, and ARIA ids; these require hooks, which require the client directive. All exports in ui.tsx are pure presentation with no server-only imports, so the change is safe.
+- 2026-06-13 — `SortKey` extended with `valueAtRisk30d` and `minDaysToExpiry` for chip-driven sort. — The `top-var` and `expiring-60` chips advertise a specific ordering that requires sorting on computed fields not in the original sort key union.
