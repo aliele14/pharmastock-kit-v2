@@ -1,5 +1,5 @@
-import { FileText } from 'lucide-react';
-import { EmptyState, PageHeader } from '@/components/ui';
+import { PageHeader } from '@/components/ui';
+import { BriefingView } from '@/components/briefing/briefing-view';
 
 export const metadata = { title: 'Briefing — PharmaStock' };
 
@@ -10,11 +10,7 @@ export default function BriefingPage() {
         title="Supply briefing"
         description="A deterministic, rules-based supply report — Risks, Actions, Watchlist."
       />
-      <EmptyState
-        icon={<FileText className="h-6 w-6" />}
-        title="Coming in Phase 2"
-        description="The briefing engine assembles a written report from pure-code rules (no LLM). It arrives in the next build phase alongside demand anomaly detection."
-      />
+      <BriefingView />
     </div>
   );
 }

@@ -16,7 +16,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/expiry', label: 'Expiry risk', icon: CalendarClock },
   { href: '/reorder', label: 'Reorder', icon: PackageSearch },
-  { href: '/briefing', label: 'Briefing', icon: FileText, soon: true },
+  { href: '/briefing', label: 'Briefing', icon: FileText },
 ];
 
 function isActive(pathname: string, href: string): boolean {
