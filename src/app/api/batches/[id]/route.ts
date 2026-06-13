@@ -14,6 +14,10 @@ const UpdateBatchSchema = z.object({
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
+  if (!z.string().uuid().safeParse(id).success) {
+    return NextResponse.json({ error: 'Invalid id — must be a UUID' }, { status: 400 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -47,6 +51,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+
+  if (!z.string().uuid().safeParse(id).success) {
+    return NextResponse.json({ error: 'Invalid id — must be a UUID' }, { status: 400 });
+  }
 
   const { error } = await getServerSupabase().from('batches').delete().eq('id', id);
   if (error) {
