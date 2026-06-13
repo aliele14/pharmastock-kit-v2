@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { ShieldCheck } from 'lucide-react';
 import { getExpiryRisk } from '@/lib/db/queries';
 import { ColdChainBadge, ExpiryBadge } from '@/components/badges';
@@ -5,6 +6,7 @@ import { Card, EmptyState, KpiCard, PageHeader } from '@/components/ui';
 import { formatCurrency, formatDate, formatDaysToExpiry, formatNumber } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+export const metadata: Metadata = { title: 'Expiry risk' };
 
 export default async function ExpiryRiskPage() {
   const { kpis, batches, expiredValue, expiredCount } = await getExpiryRisk();

@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { CheckCircle2 } from 'lucide-react';
 import { getReorderAlerts } from '@/lib/db/queries';
 import { ColdChainBadge, StatusBadge } from '@/components/badges';
@@ -5,6 +6,7 @@ import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+export const metadata: Metadata = { title: 'Reorder alerts' };
 
 export default async function ReorderPage() {
   const alerts = await getReorderAlerts();

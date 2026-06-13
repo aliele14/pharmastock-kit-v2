@@ -1,7 +1,7 @@
 import { PageHeader } from '@/components/ui';
 import { BriefingView } from '@/components/briefing/briefing-view';
 
-export const metadata = { title: 'Briefing — PharmaStock' };
+export const metadata = { title: 'Supply briefing' };
 
 export default function BriefingPage() {
   return (

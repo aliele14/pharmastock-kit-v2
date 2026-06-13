@@ -1,0 +1,17 @@
+{
+  "name": "PharmaStock — Supply Chain Analytics",
+  "short_name": "PharmaStock",
+  "description": "Pharmaceutical inventory tracker with batch/lot tracking, FEFO expiry risk, reorder intelligence, and deterministic supply briefings.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
