@@ -35,3 +35,14 @@ export interface DemandStats {
   /** Sample standard deviation (n − 1); 0 when fewer than two data points. */
   stdDev: number;
 }
+
+/** A single day's demand with its date. */
+export interface DemandPoint {
+  date: IsoDate;
+  qty: number;
+}
+
+/** A demand day flagged as anomalous (|z| > 2.5, SPEC §F5). */
+export interface AnomalyPoint extends DemandPoint {
+  zScore: number;
+}

@@ -9,3 +9,15 @@ export {
   stockStatus,
   suggestedOrderQty,
 } from './reorder';
+export { Z_THRESHOLD, MIN_DATAPOINTS, detectAnomalies, hasRecentAnomaly } from './anomalies';
+export {
+  VAR_RISK_THRESHOLD,
+  generateBriefing,
+  type BriefingInput,
+  type BriefingProduct,
+  type BriefingBatch,
+  type BriefingAnomaly,
+  type BriefingReport,
+  type BriefingLine,
+  type BriefingSection,
+} from './briefing';
