@@ -41,7 +41,15 @@ import { Card, Dialog, EmptyState } from '@/components/ui';
 import { ProductForm } from './product-form';
 import { BatchForm } from './batch-form';
 
-type SortKey = 'name' | 'category' | 'supplierName' | 'totalStock' | 'unitCost' | 'status';
+type SortKey =
+  | 'name'
+  | 'category'
+  | 'supplierName'
+  | 'totalStock'
+  | 'unitCost'
+  | 'status'
+  | 'valueAtRisk30d'
+  | 'minDaysToExpiry';
 type SortDir = 'asc' | 'desc';
 
 const STATUS_ORDER: Record<StockStatus, number> = { Critical: 0, Reorder: 1, OK: 2 };
@@ -69,6 +77,8 @@ const CHIPS: Chip[] = [
   { id: 'anomalies', label: 'Demand anomalies', icon: <Zap className="h-3.5 w-3.5" /> },
 ];
 
+const VALID_CHIP_IDS = new Set<string>(CHIPS.map((c) => c.id));
+
 function applyChip(
   products: ProductMetrics[],
   chip: ChipId,
@@ -77,7 +87,7 @@ function applyChip(
     case 'expiring-60':
       return {
         filtered: products.filter((p) => p.minDaysToExpiry <= 60),
-        sortKey: 'name',
+        sortKey: 'minDaysToExpiry',
         sortDir: 'asc',
       };
     case 'below-reorder':
@@ -95,8 +105,8 @@ function applyChip(
     case 'top-var':
       return {
         filtered: products.filter((p) => p.valueAtRisk30d > 0),
-        sortKey: 'name',
-        sortDir: 'asc',
+        sortKey: 'valueAtRisk30d',
+        sortDir: 'desc',
       };
     case 'anomalies':
       return {
@@ -104,6 +114,8 @@ function applyChip(
         sortKey: 'name',
         sortDir: 'asc',
       };
+    default:
+      return { filtered: products, sortKey: 'name', sortDir: 'asc' };
   }
 }
 
@@ -133,7 +145,9 @@ export function DashboardView({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const chipParam = searchParams.get('chip') as ChipId | null;
+  const rawChip = searchParams.get('chip');
+  const chipParam: ChipId | null =
+    rawChip !== null && VALID_CHIP_IDS.has(rawChip) ? (rawChip as ChipId) : null;
 
   const [activeChip, setActiveChip] = useState<ChipId | null>(chipParam);
   const [search, setSearch] = useState('');
@@ -150,13 +164,22 @@ export function DashboardView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function deleteProduct(id: string) {
     setDeletingId(id);
+    setDeleteError(null);
     try {
-      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setDeleteError(body.error ?? 'Failed to delete product.');
+        return;
+      }
       if (selectedId === id) setSelectedId(null);
       router.refresh();
+    } catch {
+      setDeleteError('Network error — could not delete product.');
     } finally {
       setDeletingId(null);
     }
@@ -213,6 +236,8 @@ export function DashboardView({
       if (sortKey === 'status') cmp = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
       else if (sortKey === 'totalStock') cmp = a.totalStock - b.totalStock;
       else if (sortKey === 'unitCost') cmp = a.unitCost - b.unitCost;
+      else if (sortKey === 'valueAtRisk30d') cmp = a.valueAtRisk30d - b.valueAtRisk30d;
+      else if (sortKey === 'minDaysToExpiry') cmp = a.minDaysToExpiry - b.minDaysToExpiry;
       else cmp = String(a[sortKey]).localeCompare(String(b[sortKey]));
       return cmp * dir;
     });
@@ -259,6 +284,20 @@ export function DashboardView({
           Add product
         </button>
       </div>
+
+      {deleteError ? (
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-400">
+          <span>{deleteError}</span>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            aria-label="Dismiss error"
+            className="ml-4 shrink-0 text-red-400 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
 
       {/* Quick-question chips (F6) */}
       <div className="flex flex-wrap gap-2">
@@ -480,8 +519,18 @@ export function DashboardView({
           onAddBatch={() => setDialog({ kind: 'add-batch', productId: selected.id })}
           onEditBatch={(batch) => setDialog({ kind: 'edit-batch', batch, productId: selected.id })}
           onDeleteBatch={async (batchId) => {
-            await fetch(`/api/batches/${batchId}`, { method: 'DELETE' });
-            router.refresh();
+            setDeleteError(null);
+            try {
+              const res = await fetch(`/api/batches/${batchId}`, { method: 'DELETE' });
+              if (!res.ok) {
+                const body = (await res.json().catch(() => ({}))) as { error?: string };
+                setDeleteError(body.error ?? 'Failed to delete batch.');
+                return;
+              }
+              router.refresh();
+            } catch {
+              setDeleteError('Network error — could not delete batch.');
+            }
           }}
         />
       ) : null}
