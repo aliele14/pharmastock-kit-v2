@@ -334,7 +334,7 @@ function DetailPanel({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="detail-panel-title">
       <button
         type="button"
         aria-label="Close detail panel"
@@ -345,7 +345,7 @@ function DetailPanel({
         <div className="flex items-start justify-between gap-2 border-b border-border p-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-foreground">{product.name}</h2>
+              <h2 id="detail-panel-title" className="text-base font-semibold text-foreground">{product.name}</h2>
               {product.coldChain ? <ColdChainBadge /> : null}
             </div>
             <p className="mt-1 text-sm text-muted">
