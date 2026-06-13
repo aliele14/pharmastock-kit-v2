@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generateBriefing — full report snapshot > produces the expected full report (snapshot) 1`] = `
+{
+  "generatedAt": "2026-06-13",
+  "healthy": false,
+  "lines": [
+    {
+      "section": "Risks",
+      "text": "Value at risk ≤30 days: €12,500. Highest-value batches: Amoxicillin 500mg caps lot AMOX-0001 (€6,200); Cefuroxime 500mg tabs lot CEFU-0001 (€3,800).",
+    },
+    {
+      "section": "Actions",
+      "text": "Place urgent order for Losartan 50mg tabs: 480 units suggested (30-day lead time, stock critically low).",
+    },
+    {
+      "section": "Actions",
+      "text": "Schedule reorder for 2 products at or below reorder point: Bisoprolol 5mg tabs, Furosemide 40mg tabs.",
+    },
+    {
+      "section": "Watchlist",
+      "text": "Demand for Amoxicillin 500mg caps spiked 4.2σ on 2026-06-10 — verify before next reorder.",
+    },
+    {
+      "section": "Watchlist",
+      "text": "Demand for Atorvastatin 20mg tabs spiked 3.8σ on 2026-06-06 — verify before next reorder.",
+    },
+    {
+      "section": "Risks",
+      "text": "Cold-chain stock expiring within 60 days — prioritise dispensing or arrange return: Influenza Quadrivalent injection lot INFL-0002 (42d).",
+    },
+  ],
+}
+`;

@@ -17,15 +17,18 @@ import {
   ArrowUp,
   ChevronsUpDown,
   PackageSearch,
+  Pencil,
+  Plus,
   Search,
   Snowflake,
+  Trash2,
   TrendingDown,
   X,
   Zap,
 } from 'lucide-react';
 import type { StockStatus } from '@/lib/domain';
 import type { AnomalyPoint, DemandPoint } from '@/lib/domain';
-import type { BatchView, ProductMetrics } from '@/lib/db/types';
+import type { BatchView, ProductMetrics, SupplierRow } from '@/lib/db/types';
 import {
   formatCurrency,
   formatCurrencyPrecise,
@@ -34,7 +37,9 @@ import {
   formatNumber,
 } from '@/lib/format';
 import { ColdChainBadge, ExpiryBadge, StatusBadge } from '@/components/badges';
-import { Card, EmptyState } from '@/components/ui';
+import { Card, Dialog, EmptyState } from '@/components/ui';
+import { ProductForm } from './product-form';
+import { BatchForm } from './batch-form';
 
 type SortKey = 'name' | 'category' | 'supplierName' | 'totalStock' | 'unitCost' | 'status';
 type SortDir = 'asc' | 'desc';
@@ -106,16 +111,25 @@ function applyChip(
 // Main component
 // ---------------------------------------------------------------------------
 
+type DialogState =
+  | { kind: 'add-product' }
+  | { kind: 'edit-product'; product: ProductMetrics }
+  | { kind: 'add-batch'; productId: string }
+  | { kind: 'edit-batch'; batch: BatchView; productId: string }
+  | null;
+
 export function DashboardView({
   products,
   batchesByProduct,
   demandByProduct,
   anomaliesByProduct,
+  suppliers,
 }: {
   products: ProductMetrics[];
   batchesByProduct: Record<string, BatchView[]>;
   demandByProduct: Record<string, DemandPoint[]>;
   anomaliesByProduct: Record<string, AnomalyPoint[]>;
+  suppliers: SupplierRow[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -134,6 +148,24 @@ export function DashboardView({
     chipParam ? applyChip(products, chipParam).sortDir : 'asc',
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DialogState>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deleteProduct(id: string) {
+    setDeletingId(id);
+    try {
+      await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      if (selectedId === id) setSelectedId(null);
+      router.refresh();
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function onMutationSuccess() {
+    setDialog(null);
+    router.refresh();
+  }
 
   const handleChip = useCallback(
     (id: ChipId) => {
@@ -157,7 +189,7 @@ export function DashboardView({
     () => [...new Set(products.map((p) => p.category))].sort(),
     [products],
   );
-  const suppliers = useMemo(
+  const supplierNames = useMemo(
     () => [...new Set(products.map((p) => p.supplierName))].sort(),
     [products],
   );
@@ -211,11 +243,21 @@ export function DashboardView({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Inventory</h1>
-        <p className="text-sm text-muted">
-          {formatNumber(products.length)} products · click a row for batches and reorder detail.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">Inventory</h1>
+          <p className="text-sm text-muted">
+            {formatNumber(products.length)} products · click a row for batches and reorder detail.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setDialog({ kind: 'add-product' })}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-sm font-medium text-white hover:opacity-90"
+        >
+          <Plus className="h-4 w-4" aria-hidden />
+          Add product
+        </button>
       </div>
 
       {/* Quick-question chips (F6) */}
@@ -271,7 +313,7 @@ export function DashboardView({
           aria-label="Filter by supplier"
         >
           <option value="">All suppliers</option>
-          {suppliers.map((s) => (
+          {supplierNames.map((s) => (
             <option key={s} value={s}>
               {s}
             </option>
@@ -369,6 +411,7 @@ export function DashboardView({
                     dir={sortDir}
                     onSort={toggleSort}
                   />
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
@@ -398,6 +441,27 @@ export function DashboardView({
                     <td className="px-4 py-3">
                       <StatusBadge status={p.status} />
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          aria-label={`Edit ${p.name}`}
+                          onClick={() => setDialog({ kind: 'edit-product', product: p })}
+                          className="rounded p-1 text-muted hover:bg-surface-muted hover:text-foreground"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${p.name}`}
+                          onClick={() => deleteProduct(p.id)}
+                          disabled={deletingId === p.id}
+                          className="rounded p-1 text-muted hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -413,7 +477,69 @@ export function DashboardView({
           demand={demandByProduct[selected.id] ?? []}
           anomalies={anomaliesByProduct[selected.id] ?? []}
           onClose={() => setSelectedId(null)}
+          onAddBatch={() => setDialog({ kind: 'add-batch', productId: selected.id })}
+          onEditBatch={(batch) => setDialog({ kind: 'edit-batch', batch, productId: selected.id })}
+          onDeleteBatch={async (batchId) => {
+            await fetch(`/api/batches/${batchId}`, { method: 'DELETE' });
+            router.refresh();
+          }}
         />
+      ) : null}
+
+      {/* CRUD dialogs */}
+      {dialog?.kind === 'add-product' ? (
+        <Dialog title="Add product" onClose={() => setDialog(null)}>
+          <ProductForm
+            suppliers={suppliers}
+            onSuccess={onMutationSuccess}
+            onCancel={() => setDialog(null)}
+          />
+        </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'edit-product' ? (
+        <Dialog title="Edit product" onClose={() => setDialog(null)}>
+          <ProductForm
+            suppliers={suppliers}
+            productId={dialog.product.id}
+            initial={{
+              name: dialog.product.name,
+              category: dialog.product.category,
+              unit_cost: String(dialog.product.unitCost),
+              pack_size: String(dialog.product.packSize),
+              cold_chain: dialog.product.coldChain,
+              supplier_id: suppliers.find((s) => s.name === dialog.product.supplierName)?.id ?? '',
+            }}
+            onSuccess={onMutationSuccess}
+            onCancel={() => setDialog(null)}
+          />
+        </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'add-batch' ? (
+        <Dialog title="Add batch" onClose={() => setDialog(null)}>
+          <BatchForm
+            productId={dialog.productId}
+            onSuccess={onMutationSuccess}
+            onCancel={() => setDialog(null)}
+          />
+        </Dialog>
+      ) : null}
+
+      {dialog?.kind === 'edit-batch' ? (
+        <Dialog title="Edit batch" onClose={() => setDialog(null)}>
+          <BatchForm
+            productId={dialog.productId}
+            batchId={dialog.batch.id}
+            initial={{
+              batch_number: dialog.batch.batchNumber,
+              quantity: String(dialog.batch.quantity),
+              expiry_date: dialog.batch.expiryDate,
+            }}
+            onSuccess={onMutationSuccess}
+            onCancel={() => setDialog(null)}
+          />
+        </Dialog>
       ) : null}
     </div>
   );
@@ -570,12 +696,18 @@ function DetailPanel({
   demand,
   anomalies,
   onClose,
+  onAddBatch,
+  onEditBatch,
+  onDeleteBatch,
 }: {
   product: ProductMetrics;
   batches: BatchView[];
   demand: DemandPoint[];
   anomalies: AnomalyPoint[];
   onClose: () => void;
+  onAddBatch: () => void;
+  onEditBatch: (batch: BatchView) => void;
+  onDeleteBatch: (batchId: string) => void;
 }) {
   return (
     <div className="fixed inset-0 z-30 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="detail-panel-title">
@@ -630,9 +762,19 @@ function DetailPanel({
           </div>
 
           <div>
-            <h3 className="mb-2 text-sm font-medium text-foreground">
-              Batches ({batches.length}) · FEFO order
-            </h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-medium text-foreground">
+                Batches ({batches.length}) · FEFO order
+              </h3>
+              <button
+                type="button"
+                onClick={onAddBatch}
+                className="flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-xs text-muted hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                Add batch
+              </button>
+            </div>
             {batches.length === 0 ? (
               <p className="text-sm text-muted">No batches recorded.</p>
             ) : (
@@ -652,11 +794,29 @@ function DetailPanel({
                         {formatDaysToExpiry(b.daysToExpiry)}
                       </p>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <ExpiryBadge bucket={b.bucket} />
-                      <span className="text-xs tabular-nums text-muted">
-                        {formatCurrency(b.lineValue)}
-                      </span>
+                    <div className="flex items-center gap-1">
+                      <div className="flex flex-col items-end gap-1 mr-2">
+                        <ExpiryBadge bucket={b.bucket} />
+                        <span className="text-xs tabular-nums text-muted">
+                          {formatCurrency(b.lineValue)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Edit batch ${b.batchNumber}`}
+                        onClick={() => onEditBatch(b)}
+                        className="rounded p-1 text-muted hover:bg-surface-muted hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete batch ${b.batchNumber}`}
+                        onClick={() => onDeleteBatch(b.id)}
+                        className="rounded p-1 text-muted hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   </li>
                 ))}

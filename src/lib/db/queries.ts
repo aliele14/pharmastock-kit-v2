@@ -359,7 +359,7 @@ export async function getReorderAlerts(): Promise<ProductMetrics[]> {
 
 /** All data needed by the briefing rules engine (Briefing page F4). */
 export async function getBriefingData(): Promise<BriefingInput> {
-  const { asOf, asOfIso, metrics, rawBatches, demandByProduct, anomaliesByProduct } =
+  const { asOf, asOfIso, metrics, rawBatches, anomaliesByProduct } =
     await fetchAndBuildMetrics();
 
   // Build a product lookup for batch→coldChain
@@ -423,9 +423,6 @@ export async function getBriefingData(): Promise<BriefingInput> {
     leadTimeDays: m.leadTimeDays,
     suggestedOrderQty: m.suggestedOrderQty,
   }));
-
-  // Suppress unused variable warning — demandByProduct is used in anomaly detection above
-  void demandByProduct;
 
   return {
     valueAtRisk30d,

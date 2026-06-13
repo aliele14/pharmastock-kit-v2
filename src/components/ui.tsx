@@ -58,6 +58,44 @@ export function EmptyState({
   );
 }
 
+/** Modal dialog overlay. */
+export function Dialog({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close dialog"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+      />
+      <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1 text-muted hover:bg-surface-muted hover:text-foreground"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+            </svg>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /** Shimmer block for loading skeletons. */
 export function Skeleton({ className = '' }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-surface-muted ${className}`} />;
