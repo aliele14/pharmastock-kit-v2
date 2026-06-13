@@ -56,6 +56,13 @@ export interface ProductMetrics {
   safetyStock: number;
   reorderPoint: number;
   suggestedOrderQty: number;
+  // Phase 2 — anomaly & expiry enrichment
+  /** True when any z-score anomaly falls within the last 14 days. */
+  hasAnomaly: boolean;
+  /** Days until the earliest-expiring batch; 9999 when no batches. */
+  minDaysToExpiry: number;
+  /** Σ(qty × unitCost) for future batches expiring within 30 days. */
+  valueAtRisk30d: number;
 }
 
 export interface BatchView {

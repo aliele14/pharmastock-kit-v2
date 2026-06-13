@@ -2,13 +2,21 @@ import 'server-only';
 import {
   daysToExpiry,
   demandStats,
+  detectAnomalies,
   expiryBucket,
   fefoRank,
+  hasRecentAnomaly,
   reorderPoint,
   safetyStock,
   stockStatus,
   suggestedOrderQty,
   valueAtRisk,
+  type AnomalyPoint,
+  type BriefingAnomaly,
+  type BriefingBatch,
+  type BriefingInput,
+  type BriefingProduct,
+  type DemandPoint,
 } from '@/lib/domain';
 import { getServerSupabase } from './client';
 import type {
@@ -128,6 +136,10 @@ function computeMetrics(
     safetyStock: round2(safety),
     reorderPoint: round2(rop),
     suggestedOrderQty: suggestedOrderQty(stats.mean, leadTimeDays, totalStock, product.pack_size),
+    // Phase 2 fields are added by the caller after anomaly detection
+    hasAnomaly: false,
+    minDaysToExpiry: 9999,
+    valueAtRisk30d: 0,
   };
 }
 
@@ -153,16 +165,20 @@ function toBatchViews(batches: readonly BatchRow[], unitCost: number, asOf: Date
 }
 
 // ---------------------------------------------------------------------------
-// Public queries.
+// Core shared fetch — used by dashboard, reorder, and briefing.
 // ---------------------------------------------------------------------------
 
 async function fetchAndBuildMetrics(): Promise<{
   asOf: Date;
+  asOfIso: string;
   products: ProductRow[];
   metrics: ProductMetrics[];
   rawBatches: Map<string, BatchRow[]>;
+  demandByProduct: Map<string, DemandPoint[]>;
+  anomaliesByProduct: Map<string, AnomalyPoint[]>;
 }> {
   const asOf = new Date();
+  const asOfIso = asOf.toISOString().slice(0, 10);
   // Enforce SPEC §F3 trailing 90-day window (today + 89 prior days = 90 days inclusive).
   const cutoff = new Date(
     Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate() - 89),
@@ -179,24 +195,70 @@ async function fetchAndBuildMetrics(): Promise<{
 
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
   const rawBatches = groupBy(batches, (b) => b.product_id);
-  const demandByProduct = groupBy(
+
+  // Group demand with dates, filtered to the 90-day window.
+  const demandRowsByProduct = groupBy(
     demand.filter((d) => d.date >= cutoff),
     (d) => d.product_id,
   );
 
+  const demandByProduct = new Map<string, DemandPoint[]>();
+  for (const [pid, rows] of demandRowsByProduct) {
+    demandByProduct.set(
+      pid,
+      rows.map((r) => ({ date: r.date, qty: r.qty })),
+    );
+  }
+
+  // Detect anomalies per product.
+  const anomaliesByProduct = new Map<string, AnomalyPoint[]>();
+  for (const [pid, points] of demandByProduct) {
+    anomaliesByProduct.set(pid, detectAnomalies(points));
+  }
+
   const metrics = products
-    .map((product) =>
-      computeMetrics(
+    .map((product) => {
+      const productBatches = rawBatches.get(product.id) ?? [];
+      const productDemandPoints = demandByProduct.get(product.id) ?? [];
+      const productAnomalies = anomaliesByProduct.get(product.id) ?? [];
+
+      const base = computeMetrics(
         product,
         supplierById.get(product.supplier_id),
-        rawBatches.get(product.id) ?? [],
-        (demandByProduct.get(product.id) ?? []).map((d) => d.qty),
-      ),
-    )
+        productBatches,
+        productDemandPoints.map((d) => d.qty),
+      );
+
+      // Phase 2 enrichment
+      const minDaysToExpiry =
+        productBatches.length > 0
+          ? Math.min(...productBatches.map((b) => daysToExpiry(b.expiry_date, asOf)))
+          : 9999;
+
+      const valueAtRisk30d = round2(
+        productBatches
+          .filter((b) => {
+            const d = daysToExpiry(b.expiry_date, asOf);
+            return d >= 0 && d <= 30;
+          })
+          .reduce((sum, b) => sum + b.quantity * product.unit_cost, 0),
+      );
+
+      return {
+        ...base,
+        hasAnomaly: hasRecentAnomaly(productAnomalies, asOfIso),
+        minDaysToExpiry,
+        valueAtRisk30d,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { asOf, products, metrics, rawBatches };
+  return { asOf, asOfIso, products, metrics, rawBatches, demandByProduct, anomaliesByProduct };
 }
+
+// ---------------------------------------------------------------------------
+// Public queries.
+// ---------------------------------------------------------------------------
 
 /** All products with computed stock + reorder metrics (Dashboard F1). */
 export async function getInventoryOverview(): Promise<ProductMetrics[]> {
@@ -204,12 +266,15 @@ export async function getInventoryOverview(): Promise<ProductMetrics[]> {
   return metrics;
 }
 
-/** Dashboard payload: product metrics plus their batch views, fetched once. */
+/** Dashboard payload: product metrics, batch views, demand history, anomalies. */
 export async function getDashboardData(): Promise<{
   products: ProductMetrics[];
   batchesByProduct: Record<string, BatchView[]>;
+  demandByProduct: Record<string, DemandPoint[]>;
+  anomaliesByProduct: Record<string, AnomalyPoint[]>;
 }> {
-  const { asOf, products, metrics, rawBatches } = await fetchAndBuildMetrics();
+  const { asOf, products, metrics, rawBatches, demandByProduct, anomaliesByProduct } =
+    await fetchAndBuildMetrics();
 
   const batchesByProduct: Record<string, BatchView[]> = {};
   for (const product of products) {
@@ -220,7 +285,12 @@ export async function getDashboardData(): Promise<{
     );
   }
 
-  return { products: metrics, batchesByProduct };
+  return {
+    products: metrics,
+    batchesByProduct,
+    demandByProduct: Object.fromEntries(demandByProduct),
+    anomaliesByProduct: Object.fromEntries(anomaliesByProduct),
+  };
 }
 
 /** Value-at-risk KPIs and the batches behind them (Expiry risk page F2). */
@@ -285,4 +355,87 @@ export async function getReorderAlerts(): Promise<ProductMetrics[]> {
       (a, b) =>
         severity[a.status] - severity[b.status] || b.suggestedOrderQty - a.suggestedOrderQty,
     );
+}
+
+/** All data needed by the briefing rules engine (Briefing page F4). */
+export async function getBriefingData(): Promise<BriefingInput> {
+  const { asOf, asOfIso, metrics, rawBatches, demandByProduct, anomaliesByProduct } =
+    await fetchAndBuildMetrics();
+
+  // Build a product lookup for batch→coldChain
+  const productById = new Map(metrics.map((m) => [m.id, m]));
+
+  // Expiring batches (0 ≤ days ≤ 90), enriched with product info
+  const expiringBatches: BriefingBatch[] = [];
+  for (const [pid, batches] of rawBatches) {
+    const product = productById.get(pid);
+    if (!product) continue;
+    for (const b of batches) {
+      const days = daysToExpiry(b.expiry_date, asOf);
+      if (days < 0 || days > 90) continue;
+      expiringBatches.push({
+        productName: product.name,
+        batchNumber: b.batch_number,
+        expiryDate: b.expiry_date,
+        daysToExpiry: days,
+        lineValue: round2(b.quantity * product.unitCost),
+        coldChain: product.coldChain,
+      });
+    }
+  }
+  expiringBatches.sort((a, b) => a.daysToExpiry - b.daysToExpiry);
+
+  // Recent anomalies (last 14 days only)
+  const recentAnomalies: BriefingAnomaly[] = [];
+  const cutoff14 = new Date(
+    new Date(asOfIso + 'T00:00:00Z').getTime() - 13 * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  for (const [pid, anomalies] of anomaliesByProduct) {
+    const product = productById.get(pid);
+    if (!product) continue;
+    for (const a of anomalies) {
+      if (a.date >= cutoff14) {
+        recentAnomalies.push({
+          productName: product.name,
+          date: a.date,
+          zScore: a.zScore,
+        });
+      }
+    }
+  }
+  recentAnomalies.sort((a, b) => a.date.localeCompare(b.date));
+
+  // Total value at risk ≤30d
+  const valueAtRisk30d = round2(
+    expiringBatches
+      .filter((b) => b.daysToExpiry <= 30)
+      .reduce((sum, b) => sum + b.lineValue, 0),
+  );
+
+  // Products for briefing (minimal shape)
+  const briefingProducts: BriefingProduct[] = metrics.map((m) => ({
+    name: m.name,
+    status: m.status,
+    coldChain: m.coldChain,
+    leadTimeDays: m.leadTimeDays,
+    suggestedOrderQty: m.suggestedOrderQty,
+  }));
+
+  // Suppress unused variable warning — demandByProduct is used in anomaly detection above
+  void demandByProduct;
+
+  return {
+    valueAtRisk30d,
+    products: briefingProducts,
+    expiringBatches,
+    recentAnomalies,
+  };
+}
+
+/** All suppliers (for sandbox product forms). */
+export async function getSuppliers(): Promise<SupplierRow[]> {
+  return fetchSuppliers();
 }

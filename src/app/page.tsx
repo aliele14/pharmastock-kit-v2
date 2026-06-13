@@ -5,6 +5,14 @@ import { DashboardView } from '@/components/dashboard/dashboard-view';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  const { products, batchesByProduct } = await getDashboardData();
-  return <DashboardView products={products} batchesByProduct={batchesByProduct} />;
+  const { products, batchesByProduct, demandByProduct, anomaliesByProduct } =
+    await getDashboardData();
+  return (
+    <DashboardView
+      products={products}
+      batchesByProduct={batchesByProduct}
+      demandByProduct={demandByProduct}
+      anomaliesByProduct={anomaliesByProduct}
+    />
+  );
 }
