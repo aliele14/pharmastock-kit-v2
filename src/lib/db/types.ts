@@ -84,4 +84,6 @@ export interface ExpiringBatchView extends BatchView {
 export interface ExpiryRisk {
   kpis: ExpiryKpi[];
   batches: ExpiringBatchView[];
+  expiredValue: number;
+  expiredCount: number;
 }

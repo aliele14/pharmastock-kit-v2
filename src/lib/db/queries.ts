@@ -235,11 +235,20 @@ export async function getExpiryRisk(): Promise<ExpiryRisk> {
     expiryDate: b.expiry_date,
   }));
 
+  // Separate expired (sunk loss) from future-expiring (still at risk) for distinct KPIs.
+  const futureValued = valued.filter((v) => daysToExpiry(v.expiryDate, asOf) >= 0);
+  const expiredValued = valued.filter((v) => daysToExpiry(v.expiryDate, asOf) < 0);
+
   const kpis = EXPIRY_HORIZONS.map((horizonDays) => ({
     horizonDays,
-    value: valueAtRisk(valued, horizonDays, asOf),
-    batchCount: batches.filter((b) => daysToExpiry(b.expiry_date, asOf) <= horizonDays).length,
+    value: valueAtRisk(futureValued, horizonDays, asOf),
+    batchCount: futureValued.filter((v) => daysToExpiry(v.expiryDate, asOf) <= horizonDays).length,
   }));
+
+  const expiredValue = round2(
+    expiredValued.reduce((sum, v) => sum + v.quantity * v.unitCost, 0),
+  );
+  const expiredCount = expiredValued.length;
 
   const expiringBatches: ExpiringBatchView[] = batches
     .map((b) => {
@@ -263,7 +272,7 @@ export async function getExpiryRisk(): Promise<ExpiryRisk> {
     .filter((b) => b.daysToExpiry <= 90)
     .sort((a, b) => a.daysToExpiry - b.daysToExpiry);
 
-  return { kpis, batches: expiringBatches };
+  return { kpis, batches: expiringBatches, expiredValue, expiredCount };
 }
 
 /** Products flagged for reorder, most urgent first (Reorder page F3). */

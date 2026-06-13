@@ -7,16 +7,21 @@ import { formatCurrency, formatDate, formatDaysToExpiry, formatNumber } from '@/
 export const dynamic = 'force-dynamic';
 
 export default async function ExpiryRiskPage() {
-  const { kpis, batches } = await getExpiryRisk();
+  const { kpis, batches, expiredValue, expiredCount } = await getExpiryRisk();
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Expiry risk"
-        description="Value at risk by horizon, and every batch expiring within 90 days (earliest first)."
+        description="Already-expired stock and future value at risk by horizon. Batches expiring within 90 days or already expired, earliest first."
       />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label="Already expired"
+          value={formatCurrency(expiredValue)}
+          hint={`${formatNumber(expiredCount)} batch${expiredCount === 1 ? '' : 'es'}`}
+        />
         {kpis.map((kpi) => (
           <KpiCard
             key={kpi.horizonDays}
