@@ -157,10 +157,19 @@ function toBatchViews(batches: readonly BatchRow[], unitCost: number, asOf: Date
 // ---------------------------------------------------------------------------
 
 async function fetchAndBuildMetrics(): Promise<{
+  asOf: Date;
   products: ProductRow[];
   metrics: ProductMetrics[];
   rawBatches: Map<string, BatchRow[]>;
 }> {
+  const asOf = new Date();
+  // Enforce SPEC §F3 trailing 90-day window (today + 89 prior days = 90 days inclusive).
+  const cutoff = new Date(
+    Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate() - 89),
+  )
+    .toISOString()
+    .slice(0, 10);
+
   const [suppliers, products, batches, demand] = await Promise.all([
     fetchSuppliers(),
     fetchProducts(),
@@ -170,7 +179,10 @@ async function fetchAndBuildMetrics(): Promise<{
 
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
   const rawBatches = groupBy(batches, (b) => b.product_id);
-  const demandByProduct = groupBy(demand, (d) => d.product_id);
+  const demandByProduct = groupBy(
+    demand.filter((d) => d.date >= cutoff),
+    (d) => d.product_id,
+  );
 
   const metrics = products
     .map((product) =>
@@ -183,7 +195,7 @@ async function fetchAndBuildMetrics(): Promise<{
     )
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { products, metrics, rawBatches };
+  return { asOf, products, metrics, rawBatches };
 }
 
 /** All products with computed stock + reorder metrics (Dashboard F1). */
@@ -197,8 +209,7 @@ export async function getDashboardData(): Promise<{
   products: ProductMetrics[];
   batchesByProduct: Record<string, BatchView[]>;
 }> {
-  const asOf = new Date();
-  const { products, metrics, rawBatches } = await fetchAndBuildMetrics();
+  const { asOf, products, metrics, rawBatches } = await fetchAndBuildMetrics();
 
   const batchesByProduct: Record<string, BatchView[]> = {};
   for (const product of products) {
