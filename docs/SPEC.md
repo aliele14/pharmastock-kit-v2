@@ -34,7 +34,7 @@ A public demo showing pharma supply-chain analytics. A visitor (recruiter) shoul
 
 **F6. Quick questions (preset query chips).** On the dashboard, one-click chips that apply preconfigured filter/sort combinations: "Expiring ≤60 days", "Below reorder point", "Cold-chain at risk", "Top value at risk", "Recent demand anomalies". Pure routing + filter state — gives instant answers to the questions an analyst asks daily.
 
-**F7. Sandbox CRUD + auto-reset.** Visitors can add/edit/delete products and batches (simple forms, server-validated with zod). A visible banner: "Demo sandbox — data resets every 24h." Reset: Vercel Cron hits `POST /api/admin/reset` (guarded by `CRON_SECRET` bearer header) which truncates and re-seeds. The seed script is idempotent and also runs locally via `npm run seed`.
+**F7. Sandbox CRUD + auto-reset.** Visitors can add/edit/delete products and batches (simple forms, server-validated with zod). A visible banner: "Demo sandbox — data resets every 24h." Reset: Vercel Cron hits `GET /api/admin/reset` (guarded by `CRON_SECRET` bearer header, auto-attached by Vercel) which truncates and re-seeds. A `POST` handler is also available for manual triggers. The seed script is idempotent and also runs locally via `npm run seed`.
 
 **F8. Health endpoint.** `GET /api/health` does a trivial DB read and returns `{ ok: true }`. Used by a GitHub Actions cron (every 3 days) to keep the Supabase free project from pausing.
 

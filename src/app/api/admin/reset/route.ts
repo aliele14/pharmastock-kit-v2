@@ -263,14 +263,13 @@ async function runSeed(supabase: ReturnType<typeof import('@/lib/db/client').get
 // Route handler
 // ---------------------------------------------------------------------------
 
-export async function POST(request: Request) {
-  const authHeader = request.headers.get('authorization');
+function authorized(request: Request): boolean {
   const cronSecret = process.env.CRON_SECRET;
+  const authHeader = request.headers.get('authorization');
+  return Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
+}
 
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
-    return new Response('Unauthorized', { status: 401 });
-  }
-
+async function handleReset(): Promise<Response> {
   try {
     await runSeed(getServerSupabase());
     return Response.json({ ok: true, reset: true });
@@ -278,4 +277,17 @@ export async function POST(request: Request) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return Response.json({ ok: false, error: message }, { status: 500 });
   }
+}
+
+// Vercel Cron Jobs issue GET requests — this is the primary entry point for the
+// daily auto-reset. Bearer token is auto-attached by Vercel when CRON_SECRET is set.
+export async function GET(request: Request) {
+  if (!authorized(request)) return new Response('Unauthorized', { status: 401 });
+  return handleReset();
+}
+
+// Keep POST for manual triggers (e.g. local testing via curl).
+export async function POST(request: Request) {
+  if (!authorized(request)) return new Response('Unauthorized', { status: 401 });
+  return handleReset();
 }
