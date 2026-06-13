@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 /** Surface card with subtle border. */
 export function Card({ className = '', children }: { className?: string; children: ReactNode }) {
@@ -68,6 +70,26 @@ export function Dialog({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const prevFocusRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    prevFocusRef.current = document.activeElement;
+    dialogRef.current?.focus();
+    return () => {
+      (prevFocusRef.current as HTMLElement | null)?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
       <button
@@ -76,9 +98,16 @@ export function Dialog({
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
       />
-      <div className="relative w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="relative w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-xl outline-none"
+      >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          <h2 id={titleId} className="text-base font-semibold text-foreground">{title}</h2>
           <button
             type="button"
             onClick={onClose}
