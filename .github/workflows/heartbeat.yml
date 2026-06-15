@@ -11,7 +11,9 @@ name: Heartbeat
 
 on:
   schedule:
-    - cron: '0 8 */3 * *' # 08:00 UTC every 3 days (1st, 4th, 7th … of each month)
+    - cron: '0 8 */3 * *' # 08:00 UTC on days 1,4,7,…,28,31 of each month; the day-of-month
+      # counter resets monthly, so the gap is ~3 days (1 day at month boundaries) — well within
+      # Supabase's 7-day pause window.
   workflow_dispatch: # allow manual triggers from the Actions tab
 
 jobs:
