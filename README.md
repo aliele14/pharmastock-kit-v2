@@ -8,7 +8,11 @@
 
 # PharmaStock — Supply Chain Analytics
 
-<!-- ALINA: write 3–4 sentences in your own voice: why you built this, what it demonstrates, what problem it solves for a pharma supply analyst. -->
+PharmaStock is a tool for keeping track of a pharmacy or warehouse's medicine stock. It shows you at a glance what's running low, what's about to expire (and how much money that represents), and what you should reorder — no spreadsheets required.
+
+To use it, open the dashboard: every medicine is a row, and clicking one reveals its batches, expiry dates, and demand history. You can add, edit, or delete products and batches right in the app — this live version is a sandbox, so click around freely; the demo data resets every 24 hours.
+
+I built this as an experiment — to see what I could actually create end to end, from the supply-chain math to a working app anyone can open in a browser. The whole thing was built with AI as my engineering partner (Anthropic's Claude Code), but the app itself runs on pure, deterministic code — no AI at runtime, every calculation testable and exact.
 
 **Live demo:** https://pharmastock-kit-v2.vercel.app
 
