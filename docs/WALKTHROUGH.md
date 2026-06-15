@@ -18,8 +18,8 @@ Postgres (Supabase)
 ### Step by step for the dashboard
 
 1. `src/app/page.tsx` is a React Server Component. On each request (the page is `force-dynamic` — no caching), it calls `getDashboardData()` and `getSuppliers()` in parallel.
-2. `getDashboardData()` in `src/lib/db/queries.ts` fetches all products, batches (with expiry computed by Postgres as `expiry_date - CURRENT_DATE`), and demand history (paginated with `.range()` to bypass Supabase's 1000-row default cap).
-3. Domain functions — `computeReorderMetrics`, `computeExpiryMetrics`, `hasRecentAnomaly`, etc. — transform the raw rows into typed `ProductMetrics` objects. All the supply-chain math happens here, in pure functions.
+2. `getDashboardData()` in `src/lib/db/queries.ts` fetches all products, batches (selecting the raw `expiry_date` column), and demand history (paginated with `.range()` to bypass Supabase's 1000-row default cap). Days-to-expiry is **not** computed in SQL — it is derived in the domain layer via `daysToExpiry(expiry_date, asOf)`.
+3. Pure domain functions — `demandStats`, `safetyStock`, `reorderPoint`, `daysToExpiry`, `valueAtRisk`, `detectAnomalies`, `hasRecentAnomaly` — transform the raw rows into typed `ProductMetrics` objects (assembled by the private `computeMetrics()` helper in `queries.ts`). All the supply-chain math happens here, in pure functions.
 4. The resulting data is passed as props to `DashboardView`, a client component that owns all the interactive state (search, sort, chip, selected product).
 5. When the user edits or deletes a product, the client component calls the appropriate API route handler, then calls `router.refresh()` to re-run step 1.
 
@@ -71,27 +71,25 @@ Minimum 14 datapoints to compute anomalies — below that, std dev estimates are
 
 ### Briefing rules engine (`src/lib/domain/briefing.ts`)
 
-Five rules defined as a typed array `RULES: BriefingRule[]`. Each rule is:
+Five rules defined as a typed array `RULES: readonly RuleFn[]`. Each rule is a pure function:
 ```typescript
-{
-  section: 'Risks' | 'Actions' | 'Watchlist',
-  check: (snapshot: BriefingSnapshot) => string[]   // returns 0+ sentences
-}
+type RuleFn = (input: BriefingInput) => BriefingLine[]
+// BriefingLine = { section: 'Risks' | 'Actions' | 'Watchlist'; text: string }
 ```
 
-The engine calls every rule, collects the sentences, and wraps them in a `BriefingReport`. If all rules return empty arrays, the healthy-state rule fires instead.
+The engine (`generateBriefing`) calls every rule with `flatMap`, collects the lines, and wraps them in a `BriefingReport`. If every rule returns an empty array, the engine appends a single explicit healthy-state line (so the report is never empty).
 
-The `BriefingSnapshot` type in `src/lib/domain/types.ts` is the only input. Given the same snapshot, the same report is produced — the briefing is snapshot-tested in `briefing.test.ts` with a hardcoded fixture.
+The `BriefingInput` type, defined in `src/lib/domain/briefing.ts`, is the only input. Given the same input, the same report is produced — the briefing is snapshot-tested in `briefing.test.ts` with a hardcoded fixture.
 
 ---
 
 ## Briefing: why snapshot tests are the right tool here
 
-Snapshot tests (`toMatchInlineSnapshot`) capture the exact string output of the briefing engine against a fixed `BriefingSnapshot`. When you change a rule or template, the test fails and shows you the diff. You approve the new snapshot, and the test updates.
+The snapshot test (`toMatchSnapshot()`) captures the exact output of the briefing engine against a fixed `BriefingInput`. When you change a rule or template, the test fails and shows you the diff. You approve the new snapshot, and the test updates.
 
 This is better than asserting "the report contains the word 'Amoxicillin'" because it catches regressions in any rule, not just the one you thought to test.
 
-See `src/lib/domain/briefing.test.ts` — the snapshot for the full healthy report and the snapshot for a report with all five rules firing are both committed.
+See `src/lib/domain/briefing.test.ts` — one committed snapshot captures the report with all five rules firing; the healthy-state path is covered separately by explicit string assertions.
 
 ---
 
