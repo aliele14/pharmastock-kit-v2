@@ -9,6 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://pharmastock-kit-v2.vercel.app'),
   title: {
     template: '%s — PharmaStock',
     default: 'PharmaStock — Supply Chain Analytics',
