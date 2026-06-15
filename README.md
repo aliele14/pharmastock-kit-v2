@@ -223,7 +223,7 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 CRON_SECRET=<any-random-secret-you-choose>
 ```
 
-Run the database migrations (apply `supabase/schema.sql` in the Supabase SQL editor), then seed demo data:
+Run the database migration (apply `supabase/migrations/20260612120000_initial_schema.sql` in the Supabase SQL editor), then seed demo data:
 
 ```bash
 npm run seed       # idempotent — safe to run repeatedly
